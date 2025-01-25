@@ -16,9 +16,10 @@ This project is licensed under the Apache 2.0 License - see the [LICENSE](LICENS
 ...
   connections:
     source:
-      db_path: '/full_path/sqlite_db.db'
+      bucket_name: xxx 
+      s3_prefix: xxx # optional
+      aws_access_key: "xxx"
+      aws_secret_key: "xxx"
 ...
 ```
-
-
 
