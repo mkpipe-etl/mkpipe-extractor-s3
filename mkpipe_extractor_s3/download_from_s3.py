@@ -3,15 +3,15 @@ import boto3
 from botocore.exceptions import NoCredentialsError, PartialCredentialsError
 
 
-def upload_folder_to_s3(
-    folder_path, bucket_name, s3_prefix='', table_name='', aws_access_key=None, aws_secret_key=None
+def download_folder_from_s3(
+    bucket_name, s3_prefix, local_dir, aws_access_key=None, aws_secret_key=None
 ):
     """
-    Upload a folder and its contents to an S3 bucket.
+    Download a folder and its contents from an S3 bucket to a local directory.
 
-    :param folder_path: Path to the folder to upload
     :param bucket_name: S3 bucket name
-    :param s3_prefix: S3 prefix (folder path in S3 bucket) to upload files under
+    :param s3_prefix: S3 prefix (folder path in S3 bucket) to download files from
+    :param local_dir: Local directory to download the files to
     :param aws_access_key: AWS access key (optional, uses default credentials if not provided)
     :param aws_secret_key: AWS secret key (optional, uses default credentials if not provided)
     """
@@ -26,26 +26,35 @@ def upload_folder_to_s3(
         else:
             s3_client = boto3.client('s3')  # Use default credentials
 
-        # Walk through the directory
-        for root, dirs, files in os.walk(folder_path):
-            for file in files:
-                file_path = os.path.join(root, file)
-                # Construct S3 object key (path)
-                s3_key = os.path.join(
-                    s3_prefix, table_name, os.path.relpath(file_path, folder_path)
-                ).replace('\\', '/')
+        # List objects in the specified S3 prefix (folder)
+        paginator = s3_client.get_paginator('list_objects_v2')
+        pages = paginator.paginate(Bucket=bucket_name, Prefix=s3_prefix)
 
-                # Upload the file
-                s3_client.upload_file(file_path, bucket_name, s3_key)
-                print(f'Uploaded {file_path} to s3://{bucket_name}/{s3_key}')
+        # Ensure the local directory exists
+        os.makedirs(local_dir, exist_ok=True)
 
-        
-        message = f"All files in '{folder_path}' have been uploaded to bucket '{bucket_name}' under prefix '{s3_prefix}'."
-        
+        # Download each file
+        for page in pages:
+            if 'Contents' not in page:
+                print(f"No files found in the S3 prefix '{s3_prefix}'.")
+                return
 
-    except FileNotFoundError:
-        print(f'The folder {folder_path} was not found.')
-        raise
+            for obj in page['Contents']:
+                # Get the S3 object key (file path in S3)
+                s3_key = obj['Key']
+                # Construct the local file path
+                relative_path = os.path.relpath(s3_key, s3_prefix)
+                local_file_path = os.path.join(local_dir, relative_path)
+
+                # Ensure the local directory structure exists
+                os.makedirs(os.path.dirname(local_file_path), exist_ok=True)
+
+                # Download the file
+                s3_client.download_file(bucket_name, s3_key, local_file_path)
+                print(f'Downloaded s3://{bucket_name}/{s3_key} to {local_file_path}')
+
+        message = f"All files in S3 prefix '{s3_prefix}' have been downloaded to '{local_dir}'."
+
     except NoCredentialsError:
         print('Credentials not available.')
         raise
@@ -55,6 +64,5 @@ def upload_folder_to_s3(
     except Exception as e:
         print(f'An error occurred: {e}')
         raise
-    
-    return message
 
+    return message

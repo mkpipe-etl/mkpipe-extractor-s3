@@ -1,7 +1,6 @@
 import os
 import datetime
 from pathlib import Path
-from urllib.parse import quote_plus
 from pyspark.sql import SparkSession
 from pyspark import SparkConf
 import pyspark.sql.functions as F
@@ -9,8 +8,10 @@ import pyspark.sql.functions as F
 from mkpipe.config import load_config
 from mkpipe.utils import log_container, Logger
 from mkpipe.functions_db import get_db_connector
+from mkpipe.functions_spark import remove_partitioned_parquet, get_parser
 from mkpipe.utils.base_class import PipeSettings
 from mkpipe.plugins.registry_jar import collect_jars
+from .download_from_s3 import download_folder_from_s3
 
 
 class S3Extractor:
@@ -20,14 +21,14 @@ class S3Extractor:
         else:
             self.settings = settings
         self.connection_params = config['connection_params']
-        self.db_path = os.path.abspath(self.connection_params['db_path'])
-        self.driver_name = 'sqlite'
-        self.driver_jdbc = 'org.sqlite.JDBC'
-        self.settings.driver_name = self.driver_name
-        self.jdbc_url = f'jdbc:sqlite:{self.db_path}'
+        self.bucket_name = self.connection_params['bucket_name']
+        self.s3_prefix = self.connection_params['s3_prefix']
+        self.aws_access_key = self.connection_params['aws_access_key']
+        self.aws_secret_key = self.connection_params['aws_secret_key']
 
         self.table = config['table']
         self.pass_on_error = config.get('pass_on_error', None)
+        self.file_type = config.get('file_type', 'parquet')
 
         config = load_config()
         connection_params = config['settings']['backend']
@@ -73,20 +74,28 @@ class S3Extractor:
             message = dict(table_name=target_name, status='extracting')
             logger.info(message)
 
-
             write_mode = 'overwrite'
+            s3_local_path = os.path.abspath(
+                os.path.join(self.settings.ROOT_DIR, 'artifacts', 's3', target_name)
+            )
+
             parquet_path = os.path.abspath(
                 os.path.join(self.settings.ROOT_DIR, 'artifacts', target_name)
             )
 
-            # TODO: 
-            # 1. download folder
-            # read as df
-            # write df 
+            s3_table_path = os.path.join(self.s3_prefix, name)
+            download_folder_from_s3(
+                bucket_name=self.bucket_name,
+                s3_prefix=s3_table_path,
+                local_dir=s3_local_path,
+                aws_access_key=self.aws_access_key,
+                aws_secret_key=self.aws_secret_key,
+            )
 
-            df = get_parser(file_type)(data, self.settings)
+            data = {'path': s3_local_path}
+            df = get_parser(self.file_type)(data, self.settings)
             df.write.parquet(parquet_path, mode=write_mode)
-
+            
             count_col = len(df.columns)
             count_row = df.count()
 
@@ -110,6 +119,7 @@ class S3Extractor:
         finally:
             # Ensure Spark session is closed
             spark.stop()
+            remove_partitioned_parquet(s3_local_path)
 
     @log_container(__file__)
     def extract(self):
