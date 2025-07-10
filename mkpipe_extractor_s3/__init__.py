@@ -1,4 +1,5 @@
 import os
+import gc
 import datetime
 from pathlib import Path
 from pyspark.sql import SparkSession
@@ -115,6 +116,8 @@ class S3Extractor:
                 meta_data=data,
             )
             logger.info(message)
+            df.unpersist()
+            gc.collect()
             return data
         finally:
             # Ensure Spark session is closed
