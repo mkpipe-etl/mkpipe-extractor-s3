@@ -80,10 +80,6 @@ class S3Extractor:
                 os.path.join(self.settings.ROOT_DIR, 'artifacts', 's3', target_name)
             )
 
-            parquet_path = os.path.abspath(
-                os.path.join(self.settings.ROOT_DIR, 'artifacts', target_name)
-            )
-
             s3_table_path = os.path.join(self.s3_prefix, name)
             download_folder_from_s3(
                 bucket_name=self.bucket_name,
@@ -95,20 +91,10 @@ class S3Extractor:
 
             data = {'path': s3_local_path}
             df = get_parser(self.file_type)(data, self.settings)
-            df.write.parquet(parquet_path, mode=write_mode)
-            
-            count_col = len(df.columns)
-            count_row = df.count()
 
             data = {
-                'table_name': target_name,
-                'path': parquet_path,
-                'file_type': 'parquet',
-                'number_of_columns': count_col,
-                'number_of_rows': count_row,
                 'write_mode': write_mode,
-                'pass_on_error': self.pass_on_error,
-                'replication_method': 'full',
+                'df': df,
             }
             message = dict(
                 table_name=target_name,
@@ -116,19 +102,18 @@ class S3Extractor:
                 meta_data=data,
             )
             logger.info(message)
-            df.unpersist()
-            gc.collect()
             return data
         finally:
-            # Ensure Spark session is closed
-            spark.stop()
             remove_partitioned_parquet(s3_local_path)
 
     @log_container(__file__)
     def extract(self):
         extract_start_time = datetime.datetime.now()
         logger = Logger(__file__)
-        logger.info({'message': 'Extracting data from S3...'})
+        logger.info({'message': 'Extracting data ...'})
+        logger.warning(
+            'Performing full extract of a table or without partition column with incremental table. Can cause OOM errors for large tables.'
+        )
         t = self.table
         try:
             target_name = t['target_name']
@@ -138,9 +123,8 @@ class S3Extractor:
                     {'message': f'Skipping {target_name}, already in progress...'}
                 )
                 data = {
-                    'table_name': target_name,
                     'status': 'completed',
-                    'replication_method': 'full',
+                    'df': None,
                 }
                 return data
 
