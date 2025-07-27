@@ -21,6 +21,7 @@ class S3Extractor:
             self.settings = PipeSettings(**settings)
         else:
             self.settings = settings
+        self.pipeline_name = config.get('pipeline_name', None)
         self.connection_params = config['connection_params']
         self.bucket_name = self.connection_params['bucket_name']
         self.s3_prefix = self.connection_params['s3_prefix']
@@ -118,7 +119,10 @@ class S3Extractor:
         try:
             target_name = t['target_name']
             replication_method = t.get('replication_method', None)
-            if self.backend.get_table_status(target_name) in ['extracting', 'loading']:
+            if self.backend.get_table_status(self.pipeline_name, target_name) in [
+                'extracting',
+                'loading',
+            ]:
                 logger.info(
                     {'message': f'Skipping {target_name}, already in progress...'}
                 )
@@ -129,7 +133,8 @@ class S3Extractor:
                 return data
 
             self.backend.manifest_table_update(
-                name=target_name,
+                pipeline_name=self.pipeline_name,
+                table_name=target_name,
                 value=None,  # Last point remains unchanged
                 value_type=None,  # Type remains unchanged
                 status='extracting',  # ('completed', 'failed', 'extracting', 'loading')
@@ -147,9 +152,10 @@ class S3Extractor:
                 etl_start_time=str(extract_start_time),
             )
             self.backend.manifest_table_update(
-                target_name,
-                None,
-                None,
+                pipeline_name=self.pipeline_name,
+                table_name=target_name,
+                value=None,
+                value_type=None,
                 status='failed',
                 replication_method=replication_method,
                 error_message=str(e),
